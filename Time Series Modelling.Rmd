@@ -1,0 +1,148 @@
+---
+title: "Linh tinh"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+date: "2025-03-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyquant)
+
+dataset <- tq_get('AAPL',
+               from = "2023-01-01",
+               to = "2025-01-01",
+               get = "stock.prices")
+
+dataset <- dataset[, c("date", "adjusted")]
+#dataset$x <- dataset$adjusted
+#dataset
+dataset$x <- log(dataset$adjusted)
+head(dataset)
+
+
+#dataset <- read.csv("C:\\Users\\khuem\\Downloads\\arimadat(1).csv")
+#dataset
+```
+                            series x is the log transform of the adjusted close price.
+
+```{r}
+n <- length(dataset$x)
+data_train <- dataset$x[1:(n - 25)] 
+data_test <- dataset$x[(n - 25 + 1):n] 
+plot(data_train, type = 'l')
+acf(data_train)
+pacf(data_train)
+```
+                            From the Series Plot and the PACF and ACF, the series is highly non-stationary. Therefore, taking difference is needed.
+
+
+```{r}
+diff1 <- diff(data_train)
+diff1[1:10]
+plot(diff1, type = 'l') 
+```
+                                 Diff1 series look much more stationary than the original data. However, there is still a visible trend in the data. Therefore, taking the 2nd order difference is needed.
+
+```{r}
+
+diff2 <- diff(diff1)
+plot(diff2, type = 'l') 
+pacf(diff2)
+
+ar_demo <- ar(diff2, aic = TRUE, method = 'mle')
+ar_demo
+```
+                                  The diff2 plot looks very stationary. 
+                                  
+                                  PACF plot of the diff2 series suggests that arima order 11 or 12 should be good.
+                                  
+                                  Fitting ar function model to determine the order for the ARIMA model. The order selected for the arima model by the ar function is 12. Therefore, later a complete ARIMA(12,2,0) will be fitted on the original adjusted close price for forecasting purpose.
+
+```{r}
+ar_mle <- arima(data_train, order = c(12,2,0))
+ar_mle
+
+resids <- ar_mle$resid
+plot(resids, type = 'l')
+pacf(resids)
+
+library(tseries)
+adf_test <- adf.test(resids, alternative = "stationary")
+print("ADF Test:")
+print(adf_test)
+```
+                                  The model above is the fitted ARIMA(12,2,0) model.
+                                  
+                                  The residuals of the ARIMA model strongly resemblances a white noise process, thus proving that the ARIMA(12,2,0) is enough to capture all the trend of the data series.
+                                  
+                                  The PACF of the residuals also proves the above statement. 
+                                  
+                                  To be more confirmative, Augmented Dickey-Fuller Test is conducted. The null hypothesis of non-stationary series is rejected with a p-value = 0.01 (highly significant). The conclusion is stationary.
+
+```{r}
+library(forecast);
+fitted_values <- fitted(ar_mle)
+fitted_values[1:10]
+```
+```{r}
+
+mypreds <- predict(ar_mle, n.ahead = 25, se.fit = TRUE)
+n <- length(data_train)
+fore <- c(data_train[(n-90):n], mypreds$pred)
+foreupper <- c(data_train[(n-90):n], mypreds$pred + 2 * mypreds$se)
+forelower <- c(data_train[(n-90):n], mypreds$pred - 2 * mypreds$se)
+plot(fore, type = 'l',
+     ylim = range(c(foreupper, forelower, data_test)), 
+     main = "Prediction vs Actual Test Data (Last 90 Points)", ylab = "Values")
+lines(foreupper, lty = 2, col = 'red')
+lines(forelower, lty = 2, col = 'red')
+lines((length(data_train[(n-90):n]) + 1):(length(data_train[(n-90):n]) + length(data_test)), 
+      data_test, col = 'blue', type = 'l', lwd = 2)
+
+
+fore <- c(data_train, mypreds$pred)
+foreupper <- c(data_train, mypreds$pred + 2 * mypreds$se)
+forelower <- c(data_train, mypreds$pred - 2 * mypreds$se)
+plot(fore, type = 'l',
+     ylim = range(c(foreupper, forelower, data_test)),
+     main = "Prediction vs Actual Test Data (Full Series)",
+     ylab = "Values", xlab = "Time")
+lines(foreupper, lty = 2, col = 'red')
+lines(forelower, lty = 2, col = 'red')
+lines((n + 1):(n + length(data_test)),
+      data_test, col = 'blue', type = 'l', lwd = 2)
+
+
+
+
+```
+
+```{r}
+# performance metrics for diff2 arima model
+print('Performance metrics for diff2 arima')
+mae <- mean(abs(data_test - mypreds$pred))  
+mse <- mean((data_test - mypreds$pred)^2)  
+rmse <- sqrt(mse)  
+mape <- mean(abs((data_test - mypreds$pred) / data_test)) * 100  
+ss_res <- sum((data_test - mypreds$pred)^2)  
+ss_tot <- sum((data_test - mean(data_test))^2)  
+r_squared <- 1 - (ss_res / ss_tot) 
+
+cat("MAE:", mae, "\n")
+# cat("MSE:", mse, "\n")
+cat("RMSE:", rmse, "\n")
+cat("MAPE:", mape, "%\n")
+cat("R-squared:", r_squared, "\n")
+```
+                              The error metrics (MAE, MSE, RMSE, MAPE) suggest that the model’s predictions are relatively accurate.
+
+
+
+
+
